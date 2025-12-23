@@ -502,12 +502,14 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
                       border: InputBorder.none,
                       hintText: 'Enter phone number',
                       suffixIcon: _existingVisitorPhone != null
-                          ? Icon(
-                              Icons.info,
-                              size: 20,
-                              color: Colors.blue[600],
-                              tooltip:
+                          ? Tooltip(
+                              message:
                                   'Previously used phone: $_existingVisitorPhone',
+                              child: Icon(
+                                Icons.info,
+                                size: 20,
+                                color: Colors.blue[600],
+                              ),
                             )
                           : null,
                     ),
@@ -594,12 +596,14 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
                       border: InputBorder.none,
                       hintText: 'Amazon, Uber, etc.',
                       suffixIcon: _existingVisitorCompany != null
-                          ? Icon(
-                              Icons.info,
-                              size: 20,
-                              color: Colors.blue[600],
-                              tooltip:
+                          ? Tooltip(
+                              message:
                                   'Previously used company: $_existingVisitorCompany',
+                              child: Icon(
+                                Icons.info,
+                                size: 20,
+                                color: Colors.blue[600],
+                              ),
                             )
                           : null,
                     ),

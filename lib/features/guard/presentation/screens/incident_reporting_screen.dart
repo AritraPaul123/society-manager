@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
 import 'package:image_picker/image_picker.dart';
 import 'package:society_man/core/services/local_storage_service.dart';
 import 'package:society_man/core/routes/app_routes.dart';
@@ -374,30 +375,33 @@ class _IncidentReportingScreenState extends State<IncidentReportingScreen> {
         decoration: BoxDecoration(
           color: const Color(0xFFF4F5FA),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: const Color(0xFF8063FC),
-            style: BorderStyle.dashed,
-          ),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.camera_alt_outlined,
-              size: 48,
-              color: const Color(0xFF8063FC),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Tap to take a photo',
-              style: TextStyle(fontSize: 16, color: Color(0xFF7B7A80)),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Photos help with incident investigation',
-              style: TextStyle(fontSize: 14, color: Color(0xFF7B7A80)),
-            ),
-          ],
+        child: CustomPaint(
+          painter: DashedBorderPainter(
+            color: const Color(0xFF8063FC),
+            strokeWidth: 2.0,
+            gap: 5.0,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.camera_alt_outlined,
+                size: 48,
+                color: const Color(0xFF8063FC),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Tap to take a photo',
+                style: TextStyle(fontSize: 16, color: Color(0xFF7B7A80)),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Photos help with incident investigation',
+                style: TextStyle(fontSize: 14, color: Color(0xFF7B7A80)),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -521,4 +525,85 @@ class _IncidentReportingScreenState extends State<IncidentReportingScreen> {
       ),
     );
   }
+}
+
+class DashedBorderPainter extends CustomPainter {
+  final Color color;
+  final double strokeWidth;
+  final double gap;
+
+  DashedBorderPainter({
+    required this.color,
+    required this.strokeWidth,
+    required this.gap,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke;
+
+    // Draw top dashed border
+    _drawDashedLine(canvas, Offset(0, 0), Offset(size.width, 0), paint);
+
+    // Draw right dashed border
+    _drawDashedLine(
+      canvas,
+      Offset(size.width, 0),
+      Offset(size.width, size.height),
+      paint,
+    );
+
+    // Draw bottom dashed border
+    _drawDashedLine(
+      canvas,
+      Offset(size.width, size.height),
+      Offset(0, size.height),
+      paint,
+    );
+
+    // Draw left dashed border
+    _drawDashedLine(canvas, Offset(0, size.height), Offset(0, 0), paint);
+  }
+
+  void _drawDashedLine(Canvas canvas, Offset start, Offset end, Paint paint) {
+    final dx = end.dx - start.dx;
+    final dy = end.dy - start.dy;
+    final length = math.sqrt(dx * dx + dy * dy);
+
+    if (length == 0) return;
+
+    final directionX = dx / length;
+    final directionY = dy / length;
+
+    double current = 0.0;
+    bool drawSegment = true;
+
+    while (current < length) {
+      final segmentLength = drawSegment ? strokeWidth * 3 : gap;
+      final next = current + segmentLength;
+
+      final fromX = start.dx + directionX * current;
+      final fromY = start.dy + directionY * current;
+
+      final toX = next > length
+          ? start.dx + directionX * length
+          : start.dx + directionX * next;
+      final toY = next > length
+          ? start.dy + directionY * length
+          : start.dy + directionY * next;
+
+      if (drawSegment) {
+        canvas.drawLine(Offset(fromX, fromY), Offset(toX, toY), paint);
+      }
+
+      current = next;
+      drawSegment = !drawSegment;
+    }
+  }
+
+  @override
+  bool shouldRepaint(CustomPainter oldDelegate) => false;
 }

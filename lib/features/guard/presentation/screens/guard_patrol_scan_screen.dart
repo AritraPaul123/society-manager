@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:society_man/core/services/qr_scanner_service.dart';
 import 'package:society_man/core/routes/app_routes.dart';
@@ -345,8 +347,8 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
         .length;
     final totalCheckpoints = _checkpoints.length;
     final progress = totalCheckpoints > 0
-        ? completedCheckpoints / totalCheckpoints
-        : 0;
+        ? (completedCheckpoints / totalCheckpoints).toDouble()
+        : 0.0;
 
     return Scaffold(
       appBar: AppBar(
