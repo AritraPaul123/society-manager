@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:society_man/core/models/auth_models.dart';
+import 'package:society_man/core/services/api_service.dart';
 import 'package:society_man/core/services/local_storage_service.dart';
 import 'package:society_man/core/routes/app_routes.dart';
-import 'package:camera/camera.dart';
+import 'package:society_man/core/services/ocr_service.dart';
+import 'package:image_picker/image_picker.dart';
 
 class VisitorEntryScanScreen extends StatefulWidget {
   final String? eidNumber;
@@ -34,7 +36,8 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
   bool _isLoading = false;
   bool _isSubmitting = false;
   bool _isDraft = false;
-  String? _selectedPurpose;
+
+  final OCRService _ocrService = OCRService();
 
   @override
   void initState() {
@@ -56,6 +59,40 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
     if (widget.isDraft) {
       _isDraft = true;
       _loadDraftData();
+    }
+  }
+
+  Future<void> _scanEmiratesId() async {
+    final ImagePicker picker = ImagePicker();
+    final XFile? image = await picker.pickImage(source: ImageSource.camera);
+
+    if (image != null) {
+      setState(() => _isLoading = true);
+      try {
+        final results = await _ocrService.scanEmiratesId(image);
+        setState(() {
+          if (results['idNumber']!.isNotEmpty) {
+            _eidController.text = results['idNumber']!;
+            _checkForExistingVisitor();
+          }
+          if (_visitorNameController.text.isEmpty &&
+              results['name']!.isNotEmpty) {
+            _visitorNameController.text = results['name']!;
+          }
+        });
+
+        // Auto-save as draft if basic info is present
+        if (_eidController.text.isNotEmpty &&
+            _visitorNameController.text.isNotEmpty) {
+          _saveAsDraft(silent: true);
+        }
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('OCR Error: $e'), backgroundColor: Colors.red),
+        );
+      } finally {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -126,9 +163,9 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
     // For now, this is a placeholder
   }
 
-  Future<void> _saveAsDraft() async {
+  Future<void> _saveAsDraft({bool silent = false}) async {
     if (_eidController.text.isEmpty || _visitorNameController.text.isEmpty) {
-      if (mounted) {
+      if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('EID and Name are required to save as draft'),
@@ -139,9 +176,11 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
       return;
     }
 
-    setState(() {
-      _isSubmitting = true;
-    });
+    if (!silent) {
+      setState(() {
+        _isSubmitting = true;
+      });
+    }
 
     try {
       final visitorEntry = VisitorEntry(
@@ -150,16 +189,16 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
         visitorName: _visitorNameController.text,
         phoneNumber: _phoneController.text,
         purpose: _purposeController.text,
-        companyName: _companyController.text, // Added company name to draft
+        companyName: _companyController.text,
         entryTime: DateTime.now(),
-        guardId: 'GRD001', // This should be the actual guard ID
+        guardId: 'GRD001',
         status: 'draft',
         isDraft: true,
       );
 
       await LocalStorageService.saveDraft(visitorEntry);
 
-      if (mounted) {
+      if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Entry saved as draft successfully'),
@@ -171,7 +210,7 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
         Navigator.pushReplacementNamed(context, AppRoutes.attendanceManagement);
       }
     } catch (e) {
-      if (mounted) {
+      if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error saving draft: ${e.toString()}'),
@@ -180,7 +219,7 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
         );
       }
     } finally {
-      if (mounted) {
+      if (!silent && mounted) {
         setState(() {
           _isSubmitting = false;
         });
@@ -276,7 +315,7 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
 
       // Create visitor entry
       final visitorEntry = VisitorEntry(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: '0', // Backend will generate ID
         eidNumber: _eidController.text,
         visitorName: _visitorNameController.text,
         phoneNumber: _phoneController.text,
@@ -288,9 +327,10 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
             'pending_resident', // Will be updated based on resident approval
       );
 
-      // In a real app, this would be saved to a backend
-      // For now, we'll navigate to permission screen
-      if (mounted) {
+      // Save to backend
+      final success = await ApiService().createVisitorEntry(visitorEntry);
+
+      if (success && mounted) {
         Navigator.pushNamed(
           context,
           AppRoutes.visitorPermission,
@@ -299,6 +339,7 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
             'visitorPhone': _phoneController.text,
             'visitorPurpose': _purposeController.text,
             'visitorCompany': _companyController.text,
+            'eidNumber': _eidController.text,
           },
         );
       }
@@ -423,6 +464,27 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
               fontSize: 16,
               fontWeight: FontWeight.w500,
               color: Colors.black,
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // EID Scan Button
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton.icon(
+              onPressed: _scanEmiratesId,
+              icon: const Icon(Icons.document_scanner),
+              label: const Text('Scan Emirates ID'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF8063FC).withOpacity(0.1),
+                foregroundColor: const Color(0xFF8063FC),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  side: const BorderSide(color: Color(0xFF8063FC), width: 1.5),
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 16),

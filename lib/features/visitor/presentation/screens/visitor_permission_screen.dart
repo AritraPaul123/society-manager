@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:society_man/core/routes/app_routes.dart';
+import 'package:society_man/core/services/local_storage_service.dart';
+import 'package:society_man/core/models/auth_models.dart';
 
 class VisitorPermissionScreen extends StatelessWidget {
   final String visitorName;
   final String visitorPhone;
   final String visitorPurpose;
   final String? visitorCompany;
+  final String? eidNumber;
 
   const VisitorPermissionScreen({
     super.key,
@@ -13,6 +16,7 @@ class VisitorPermissionScreen extends StatelessWidget {
     required this.visitorPhone,
     required this.visitorPurpose,
     this.visitorCompany,
+    this.eidNumber,
   });
 
   @override
@@ -253,37 +257,58 @@ class VisitorPermissionScreen extends StatelessWidget {
     );
   }
 
-  void _handleAction(BuildContext context, String action) {
+  Future<void> _handleAction(BuildContext context, String action) async {
     // Log the action
     print('Action taken: $action');
     print(
       'Visitor: $visitorName, Phone: $visitorPhone, Purpose: $visitorPurpose',
     );
 
-    // Show a confirmation message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          action == 'allow'
-              ? 'Entry allowed for $visitorName'
-              : action == 'inform'
-              ? 'Resident has been informed about $visitorName'
-              : 'Entry denied for $visitorName',
-        ),
-        duration: const Duration(seconds: 2),
-      ),
+    String status = 'pending_resident';
+    if (action == 'allow') status = 'allowed';
+    if (action == 'deny') status = 'denied';
+
+    // Save visitor entry
+    final entry = VisitorEntry(
+      id: 'VIS_${DateTime.now().millisecondsSinceEpoch}',
+      eidNumber: eidNumber ?? 'N/A',
+      visitorName: visitorName,
+      phoneNumber: visitorPhone,
+      purpose: visitorPurpose,
+      companyName: visitorCompany,
+      entryTime: DateTime.now(),
+      guardId: 'GRD001', // Should be dynamic in real app
+      status: status,
     );
 
-    // Navigate back to attendance management
-    Future.delayed(const Duration(seconds: 1), () {
-      if (context.mounted) {
-        Navigator.pushNamedAndRemoveUntil(
-          context,
-          AppRoutes.attendanceManagement,
-          (route) => false,
-        );
-      }
-    });
+    await LocalStorageService.saveVisitorEntry(entry);
+
+    // Show a confirmation message
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            action == 'allow'
+                ? 'Entry allowed for $visitorName'
+                : action == 'inform'
+                ? 'Resident has been informed about $visitorName'
+                : 'Entry denied for $visitorName',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      // Navigate back to attendance management
+      Future.delayed(const Duration(seconds: 1), () {
+        if (context.mounted) {
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            AppRoutes.attendanceManagement,
+            (route) => false,
+          );
+        }
+      });
+    }
   }
 
   String _capitalizePurpose(String purpose) {

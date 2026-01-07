@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:society_man/core/services/qr_scanner_service.dart';
+import 'package:society_man/core/services/api_service.dart';
 import 'package:society_man/core/routes/app_routes.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:society_man/core/services/offline_sync_service.dart';
 import 'package:society_man/core/services/local_storage_service.dart';
 import 'package:society_man/core/models/auth_models.dart';
 import 'dart:io';
@@ -23,8 +25,7 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
   bool _isOfflineMode = false;
   bool _isSyncing = false;
   bool _isPaused = false;
-  late PatrolSession _patrolSession;
-  late Stream<List<ConnectivityResult>> _connectivityStream;
+  PatrolSession? _patrolSession;
 
   final List<PatrolCheckpoint> _checkpoints = [
     PatrolCheckpoint(
@@ -65,11 +66,24 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
     ),
   ];
 
+  final OfflineSyncService _offlineSyncService = OfflineSyncService();
+
   @override
   void initState() {
     super.initState();
-    _initializePatrolSession();
+    _checkInitialConnectivity();
     _initializeConnectivityListener();
+  }
+
+  Future<void> _checkInitialConnectivity() async {
+    final results = await Connectivity().checkConnectivity();
+    final result = results.isNotEmpty ? results.first : ConnectivityResult.none;
+    setState(() {
+      _isOnline = result != ConnectivityResult.none;
+      if (_isOnline) {
+        _initializePatrolSession();
+      }
+    });
   }
 
   void _initializePatrolSession() {
@@ -86,87 +100,77 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
   }
 
   void _initializeConnectivityListener() {
-    _connectivityStream = Connectivity().onConnectivityChanged;
-    _connectivityStream.listen((List<ConnectivityResult> results) {
+    Connectivity().onConnectivityChanged.listen((
+      List<ConnectivityResult> results,
+    ) {
       if (mounted) {
         setState(() {
-          // Use the first result or check if any connection is available
+          bool wasOnline = _isOnline;
           ConnectivityResult result = results.isNotEmpty
               ? results.first
               : ConnectivityResult.none;
           _isOnline = result != ConnectivityResult.none;
 
-          // Handle connectivity changes
-          if (_isOnline && _isOfflineMode) {
-            _handleOnlineReconnection();
-          } else if (!_isOnline && !_isOfflineMode) {
+          if (wasOnline && !_isOnline) {
             _handleOfflineMode();
+          } else if (!wasOnline && _isOnline) {
+            _handleBackOnline();
           }
         });
       }
     });
   }
 
-  void _handleOnlineReconnection() async {
+  void _handleOfflineMode() {
     setState(() {
-      _isSyncing = true;
+      _isOfflineMode = true;
     });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Offline – Data Safe'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
 
+  void _handleBackOnline() {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Back Online – Syncing Data...'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+    _handleOnlineSync();
+    _endPatrol();
+  }
+
+  Future<void> _handleOnlineSync() async {
+    if (_isSyncing) return;
+    setState(() => _isSyncing = true);
     try {
-      // Sync pending patrol data
-      final pendingData = await LocalStorageService.getPendingPatrolData();
-      // In a real app, you would send this data to your backend
-
-      // Clear pending data after sync
-      await LocalStorageService.clearPendingPatrolData();
-
-      // Update patrol session
-      _patrolSession.isOffline = false;
-      await LocalStorageService.saveActivePatrol(_patrolSession);
-
+      // In a real app, get token from AuthService
+      await _offlineSyncService.syncWithServer(
+        'http://localhost:8080',
+        'dummy_token',
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Data synced successfully!'),
+            content: Text('Offline data synced successfully'),
             backgroundColor: Colors.green,
           ),
         );
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Sync failed: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      print('Sync error: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isSyncing = false;
-          _isOfflineMode = false;
-        });
-      }
-    }
-  }
-
-  void _handleOfflineMode() {
-    setState(() {
-      _isOfflineMode = true;
-      _patrolSession.isOffline = true;
-    });
-
-    // Save patrol session locally
-    LocalStorageService.saveActivePatrol(_patrolSession);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Offline mode enabled - Data will be saved locally'),
-          backgroundColor: Colors.orange,
-        ),
-      );
+      setState(() => _isSyncing = false);
     }
   }
 
@@ -219,21 +223,22 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
       currentCheckpoint.photo = photoFile;
 
       // Move to next checkpoint
-      if (_patrolSession.currentCheckpointIndex < _checkpoints.length - 1) {
-        _patrolSession.currentCheckpointIndex++;
+      if (_patrolSession != null &&
+          _patrolSession!.currentCheckpointIndex < _checkpoints.length - 1) {
+        _patrolSession!.currentCheckpointIndex++;
       }
 
       // Save patrol data
       await LocalStorageService.saveActivePatrol(_patrolSession);
 
       // If offline, save pending data
-      if (_isOfflineMode) {
+      if (_isOfflineMode && _patrolSession != null) {
         final pendingData = {
           'checkpointId': currentCheckpoint.id,
           'timestamp': DateTime.now().toIso8601String(),
           'photoPath': photo.path,
           'guardId': widget.guardId,
-          'patrolId': _patrolSession.id,
+          'patrolId': _patrolSession!.id,
         };
 
         await LocalStorageService.savePendingPatrolData(pendingData);
@@ -256,13 +261,13 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
       'id': 'incident_${DateTime.now().millisecondsSinceEpoch}',
       'timestamp': DateTime.now().toIso8601String(),
       'guardId': widget.guardId,
-      'patrolId': _patrolSession.id,
+      'patrolId': _patrolSession?.id,
       'checkpointId': _getCurrentCheckpoint().id,
       'description': 'Sample incident reported',
     };
 
     // Add to patrol session incidents
-    _patrolSession.incidents.add(incident);
+    _patrolSession?.incidents.add(incident);
 
     // Save patrol data
     await LocalStorageService.saveActivePatrol(_patrolSession);
@@ -270,12 +275,23 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
     // If offline, save pending data
     if (_isOfflineMode) {
       await LocalStorageService.savePendingPatrolData(incident);
+    } else {
+      // Auto create Helpdesk Ticket if online
+      await ApiService().createHelpdeskTicket({
+        'title': 'Patrol Incident: ${_getCurrentCheckpoint().name}',
+        'description': incident['description'],
+        'priority': 'HIGH',
+        'category': 'SECURITY',
+        'guardId': incident['guardId'],
+        'patrolId': incident['patrolId'],
+        'checkpointId': incident['checkpointId'],
+      });
     }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Incident reported successfully!'),
+          content: Text('Incident reported and linked to Helpdesk!'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -285,7 +301,7 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
   Future<void> _pausePatrol() async {
     setState(() {
       _isPaused = true;
-      _patrolSession.isPaused = true;
+      _patrolSession?.isPaused = true;
     });
 
     // Save patrol session
@@ -304,7 +320,7 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
   Future<void> _resumePatrol() async {
     setState(() {
       _isPaused = false;
-      _patrolSession.isPaused = false;
+      _patrolSession?.isPaused = false;
     });
 
     // Save patrol session
@@ -321,7 +337,7 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
   }
 
   Future<void> _endPatrol() async {
-    _patrolSession.endTime = DateTime.now();
+    _patrolSession?.endTime = DateTime.now();
 
     // Save patrol session
     await LocalStorageService.saveActivePatrol(null); // Clear active patrol
@@ -344,7 +360,7 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
   }
 
   PatrolCheckpoint _getCurrentCheckpoint() {
-    return _checkpoints[_patrolSession.currentCheckpointIndex];
+    return _checkpoints[_patrolSession?.currentCheckpointIndex ?? 0];
   }
 
   double get _progress {
@@ -371,17 +387,39 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 361),
                   child: Column(
-                    children: [
-                      _buildConnectionStatusCard(),
-                      const SizedBox(height: 16),
-                      _buildPatrolProgressCard(),
-                      const SizedBox(height: 24),
-                      _buildQRCheckpointCard(),
-                      const SizedBox(height: 24),
-                      _buildAllCheckpointsList(),
-                      const SizedBox(height: 24),
-                      _buildActionButtons(),
-                    ],
+                    children: _patrolSession == null
+                        ? [
+                            _buildConnectionStatusCard(),
+                            const SizedBox(height: 100),
+                            const Center(
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.cloud_off,
+                                    size: 64,
+                                    color: Colors.grey,
+                                  ),
+                                  SizedBox(height: 16),
+                                  Text(
+                                    'Waiting for internet connection to start patrol...',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ]
+                        : [
+                            _buildConnectionStatusCard(),
+                            const SizedBox(height: 16),
+                            _buildPatrolProgressCard(),
+                            const SizedBox(height: 24),
+                            _buildQRCheckpointCard(),
+                            const SizedBox(height: 24),
+                            _buildAllCheckpointsList(),
+                            const SizedBox(height: 24),
+                            _buildActionButtons(),
+                          ],
                   ),
                 ),
               ),
@@ -602,7 +640,7 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Checkpoint ${_patrolSession.currentCheckpointIndex + 1}: ${_getCurrentCheckpoint().name}',
+                  'Checkpoint ${(_patrolSession?.currentCheckpointIndex ?? 0) + 1}: ${_getCurrentCheckpoint().name}',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.normal,
@@ -865,7 +903,7 @@ class _EnhancedPatrolScreenState extends State<EnhancedPatrolScreen> {
             itemBuilder: (context, index) {
               final checkpoint = _checkpoints[index];
               final isCurrentCheckpoint =
-                  index == _patrolSession.currentCheckpointIndex;
+                  index == (_patrolSession?.currentCheckpointIndex ?? -1);
               final isCompleted = checkpoint.isCompleted;
 
               return Container(

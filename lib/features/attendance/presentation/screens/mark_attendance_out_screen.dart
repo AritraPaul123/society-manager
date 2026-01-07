@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:society_man/core/services/face_scanner_service.dart';
 import 'package:society_man/core/routes/app_routes.dart';
+import 'package:society_man/core/services/api_service.dart';
 import 'package:society_man/core/services/local_storage_service.dart';
 import 'package:society_man/core/models/auth_models.dart';
 import 'dart:io';
@@ -44,6 +45,8 @@ class _MarkAttendanceOutScreenState extends State<MarkAttendanceOutScreen> {
         _location = 'Location services are disabled.';
         _isLocationEnabled = false;
       });
+      // Open location settings to allow user to enable location
+      await Geolocator.openLocationSettings();
       return;
     }
 
@@ -67,12 +70,62 @@ class _MarkAttendanceOutScreenState extends State<MarkAttendanceOutScreen> {
       return;
     }
 
-    // Get current location
-    final position = await Geolocator.getCurrentPosition();
+    // Set initial location state to loading
     setState(() {
-      _location = '${position.latitude}, ${position.longitude}';
-      _isLocationEnabled = true;
+      _location = 'Getting location...';
+      _isLocationEnabled = false;
     });
+
+    // Get current location with timeout
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+      setState(() {
+        _location = '${position.latitude}, ${position.longitude}';
+        _isLocationEnabled = true;
+      });
+    } catch (e) {
+      setState(() {
+        _location = 'Unable to get location: ${e.toString()}';
+        _isLocationEnabled = false;
+      });
+    }
+  }
+
+  Future<void> _refreshLocation() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      setState(() {
+        _location = 'Location services are disabled.';
+        _isLocationEnabled = false;
+      });
+      // Open location settings to allow user to enable location
+      await Geolocator.openLocationSettings();
+      return;
+    }
+
+    // Always try to get a fresh location
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+      setState(() {
+        _location = '${position.latitude}, ${position.longitude}';
+        _isLocationEnabled = true;
+      });
+    } catch (e) {
+      setState(() {
+        _location = 'Unable to get location: ${e.toString()}';
+        _isLocationEnabled = false;
+      });
+    }
   }
 
   Future<void> _handleFaceScan() async {
@@ -120,77 +173,66 @@ class _MarkAttendanceOutScreenState extends State<MarkAttendanceOutScreen> {
       return;
     }
 
-    if (!_isLocationEnabled) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Location is required for attendance'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
-
     setState(() {
       _isCheckingOut = true;
     });
 
     try {
-      // Get current location
-      final position = await Geolocator.getCurrentPosition();
-      final location = '${position.latitude}, ${position.longitude}';
-
-      // Update the existing attendance record with check-out time
-      final records = await LocalStorageService.getAttendanceRecords();
-      final activeRecord = records.reversed.firstWhere(
-        (record) =>
-            record['guardId'] == widget.guardId &&
-            record['checkOutTime'] == null,
-        orElse: () => null,
-      );
-
-      if (activeRecord != null) {
-        // Remove the old record and add an updated one with check-out time
-        records.removeWhere((record) => record == activeRecord);
-
-        final updatedRecord = {
-          ...activeRecord,
-          'checkOutTime': DateTime.now().toIso8601String(),
-          'status': 'AttendanceStatus.offDuty',
-        };
-
-        records.add(updatedRecord);
-
-        // Save back to storage
-        await LocalStorageService.saveAttendanceRecord(
-          AttendanceRecord(
-            guardId: updatedRecord['guardId'],
-            staffId: updatedRecord['staffId'],
-            checkInTime: DateTime.parse(updatedRecord['checkInTime']),
-            checkOutTime: DateTime.parse(updatedRecord['checkOutTime']),
-            location: updatedRecord['location'],
-            status: AttendanceStatus.offDuty,
-            checkOutFaceImage: _capturedFace,
+      // Get current location with timeout, regardless of initial status
+      String location;
+      bool locationEnabled = false;
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 10),
           ),
         );
-      } else {
-        // If no active record found, create a new one with check-out only
-        await LocalStorageService.saveAttendanceRecord(
-          AttendanceRecord(
-            guardId: widget.guardId,
-            staffId: widget.staffId,
-            checkInTime:
-                DateTime.now(), // This is actually the check-out time in this case
-            checkOutTime: DateTime.now(),
-            location: location,
-            status: AttendanceStatus.offDuty,
-            checkOutFaceImage: _capturedFace,
-          ),
-        );
+        location = '${position.latitude}, ${position.longitude}';
+        locationEnabled = true;
+      } catch (e) {
+        location = 'Unable to get location: ${e.toString()}';
+        locationEnabled = false;
       }
 
+      if (!locationEnabled) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Location is required for attendance'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        setState(() {
+          _isCheckingOut = false;
+        });
+        return;
+      }
+
+      print('DEBUG: Checking out guard: ${widget.guardId}');
+
+      // Save to backend
+      final success = await ApiService().checkOut(widget.guardId);
+
+      print('DEBUG: Check-out API call result: $success');
+
+      if (!success) {
+        throw Exception('Failed to check out on server - API returned false');
+      }
+
+      // Also save locally
+      await LocalStorageService.markAttendanceCheckOut(
+        guardId: widget.guardId,
+        location: location,
+        faceImage: _capturedFace,
+      );
+
       if (mounted) {
+        setState(() {
+          _isCheckingOut = false;
+        });
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Check-out recorded successfully! Status: Off Duty'),
@@ -198,16 +240,13 @@ class _MarkAttendanceOutScreenState extends State<MarkAttendanceOutScreen> {
           ),
         );
 
-        // Navigate back to dashboard
-        await Future.delayed(const Duration(seconds: 2));
-        if (mounted) {
-          Navigator.pushReplacementNamed(
-            context,
-            AppRoutes.attendanceManagement,
-          );
-        }
+        // Return true to indicate successful check-out
+        Navigator.of(context).pop(true);
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('ERROR: Exception during check-out: $e');
+      print('Stack trace: $stackTrace');
+
       if (mounted) {
         setState(() {
           _isCheckingOut = false;
@@ -368,6 +407,19 @@ class _MarkAttendanceOutScreenState extends State<MarkAttendanceOutScreen> {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  onPressed: _refreshLocation,
+                  icon: Icon(
+                    Icons.refresh,
+                    size: 16,
+                    color: _isLocationEnabled
+                        ? const Color(0xFF4CAF50)
+                        : const Color(0xFFFF9800),
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
                 ),
               ],
             ),

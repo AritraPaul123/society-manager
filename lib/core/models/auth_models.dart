@@ -52,35 +52,84 @@ class User {
 }
 
 class AttendanceRecord {
+  final String id;
   final String guardId;
   final String staffId;
-  final DateTime checkInTime;
+  final String guardName;
+  final DateTime? checkInTime;
   final DateTime? checkOutTime;
-  final String location;
-  final AttendanceStatus status;
-  File? checkInFaceImage;
-  File? checkOutFaceImage;
+  final String? location;
+  final String? notes;
+  final DateTime createdAt;
+  String? checkInFaceImagePath;
+  String? checkOutFaceImagePath;
 
   AttendanceRecord({
+    required this.id,
     required this.guardId,
     required this.staffId,
-    required this.checkInTime,
+    required this.guardName,
+    this.checkInTime,
     this.checkOutTime,
-    required this.location,
-    required this.status,
-    this.checkInFaceImage,
-    this.checkOutFaceImage,
+    this.location,
+    this.notes,
+    required this.createdAt,
+    this.checkInFaceImagePath,
+    this.checkOutFaceImagePath,
   });
 
   Map<String, dynamic> toMap() {
     return {
+      'id': id,
       'guardId': guardId,
       'staffId': staffId,
-      'checkInTime': checkInTime.toIso8601String(),
+      'guardName': guardName,
+      'checkInTime': checkInTime?.toIso8601String(),
       'checkOutTime': checkOutTime?.toIso8601String(),
       'location': location,
-      'status': status.toString(),
+      'notes': notes,
+      'createdAt': createdAt.toIso8601String(),
+      'checkInFaceImagePath': checkInFaceImagePath,
+      'checkOutFaceImagePath': checkOutFaceImagePath,
     };
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'guardId': guardId,
+      'staffId': staffId,
+      'guardName': guardName,
+      'checkInTime': checkInTime?.toIso8601String(),
+      'checkOutTime': checkOutTime?.toIso8601String(),
+      'location': location,
+      'notes': notes,
+      'createdAt': createdAt.toIso8601String(),
+      'checkInFaceImagePath': checkInFaceImagePath,
+      'checkOutFaceImagePath': checkOutFaceImagePath,
+    };
+  }
+
+  factory AttendanceRecord.fromJson(Map<String, dynamic> json) {
+    return AttendanceRecord(
+      id: json['id']?.toString() ?? '',
+      guardId: json['guardId']?.toString() ?? '',
+      staffId: json['staffId']?.toString() ?? '',
+      guardName: json['guardName'] ?? '',
+      checkInTime: json['checkInTime'] != null
+          ? DateTime.parse(json['checkInTime'])
+          : null,
+      checkOutTime: json['checkOutTime'] != null
+          ? DateTime.parse(json['checkOutTime'])
+          : null,
+      location: json['location'],
+      notes: json['notes'],
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'])
+          : DateTime.now(),
+      checkInFaceImagePath: json['checkInFaceImagePath'],
+      checkOutFaceImagePath: json['checkOutFaceImagePath'],
+    );
   }
 }
 
@@ -140,10 +189,12 @@ class VisitorEntry {
   final String purpose;
   final String? companyName;
   final DateTime entryTime;
+  DateTime? exitTime;
   final String guardId;
-  final String status; // 'allowed', 'pending_resident', 'denied', 'draft'
+  String
+  status; // 'allowed', 'pending_resident', 'denied', 'draft', 'checked_out'
   final bool isDraft;
-  File? photo;
+  final String? photoPath;
 
   VisitorEntry({
     required this.id,
@@ -153,10 +204,11 @@ class VisitorEntry {
     required this.purpose,
     this.companyName,
     required this.entryTime,
+    this.exitTime,
     required this.guardId,
     required this.status,
     this.isDraft = false,
-    this.photo,
+    this.photoPath,
   });
 
   Map<String, dynamic> toMap() {
@@ -168,11 +220,39 @@ class VisitorEntry {
       'purpose': purpose,
       'companyName': companyName,
       'entryTime': entryTime.toIso8601String(),
+      'exitTime': exitTime?.toIso8601String(),
       'guardId': guardId,
       'status': status,
       'isDraft': isDraft,
+      'photoPath': photoPath,
     };
   }
+
+  Map<String, dynamic> toJson() => toMap();
+
+  factory VisitorEntry.fromMap(Map<String, dynamic> map) {
+    return VisitorEntry(
+      id: map['id']?.toString() ?? '',
+      eidNumber: map['eidNumber']?.toString() ?? '',
+      visitorName: map['visitorName'] ?? '',
+      phoneNumber: map['phoneNumber'] ?? '',
+      purpose: map['purpose'] ?? '',
+      companyName: map['companyName'],
+      entryTime: map['entryTime'] != null
+          ? DateTime.parse(map['entryTime'])
+          : DateTime.now(),
+      exitTime: map['exitTime'] != null
+          ? DateTime.parse(map['exitTime'])
+          : null,
+      guardId: map['guardId']?.toString() ?? '',
+      status: map['status'] ?? 'allowed',
+      isDraft: map['isDraft'] ?? false,
+      photoPath: map['photoPath'],
+    );
+  }
+
+  factory VisitorEntry.fromJson(Map<String, dynamic> json) =>
+      VisitorEntry.fromMap(json);
 }
 
 class PatrolCheckpoint {

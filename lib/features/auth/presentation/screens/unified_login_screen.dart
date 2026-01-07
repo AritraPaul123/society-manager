@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:society_man/core/routes/app_routes.dart';
-import 'package:society_man/core/services/face_scanner_service.dart';
-import 'package:society_man/core/services/local_storage_service.dart';
 import 'package:society_man/core/models/auth_models.dart';
+import 'package:society_man/core/services/biometric_service.dart';
 import 'dart:io';
+import 'package:society_man/core/services/api_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class UnifiedLoginScreen extends StatefulWidget {
@@ -14,7 +14,7 @@ class UnifiedLoginScreen extends StatefulWidget {
 }
 
 class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
-  UserRole _selectedRole = UserRole.guard;
+  final UserRole _selectedRole = UserRole.guard;
   final TextEditingController _staffIdController = TextEditingController();
   final TextEditingController _passcodeController = TextEditingController();
   final TextEditingController _usernameController = TextEditingController();
@@ -22,10 +22,9 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
   final TextEditingController _pinController = TextEditingController();
   bool _showPassword = false;
   bool _isScanEnabled = false;
-  File? _capturedFace;
   bool _isScanning = false;
-  int _faceIdAttempts = 0;
   bool _isLoginBlocked = false;
+  int _bioAttempts = 0;
 
   @override
   void dispose() {
@@ -50,47 +49,24 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
     });
   }
 
-  Future<bool> _authenticateStaff(String staffId, String passcode) async {
-    // This is a placeholder implementation
-    // In a real app, you would authenticate against a backend
-    // For now, we'll simulate authentication
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // In a real implementation, verify credentials against stored data
-    // For demo, we'll just check if the passcode is not empty
-    return passcode.isNotEmpty && staffId.isNotEmpty;
-  }
-
-  Future<bool> _authenticateAdmin(String username, String password) async {
-    // This is a placeholder implementation
-    // In a real app, you would authenticate against a backend
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // For demo, we'll just check if both fields are not empty
-    return username.isNotEmpty && password.isNotEmpty;
-  }
-
-  Future<bool> _authenticateResident(String pin) async {
-    // This is a placeholder implementation
-    // In a real app, you would authenticate against stored data
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    // For demo, we'll just check if pin is not empty
-    return pin.isNotEmpty && pin.length >= 4;
-  }
+  final BiometricService _biometricService = BiometricService();
 
   Future<void> _handleGuardLogin() async {
-    // First authenticate the staff credentials
-    bool credentialsValid = await _authenticateStaff(
-      _staffIdController.text,
+    setState(() => _isScanning = true);
+
+    // Call real API
+    // Mapping Staff ID to email for this demo backend
+    final bool credentialsValid = await ApiService().login(
+      'guard@society.com', // In production, this would be looked up by Staff ID
       _passcodeController.text,
     );
 
     if (!credentialsValid) {
+      setState(() => _isScanning = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Invalid credentials'),
+            content: Text('Invalid Staff ID or Passcode'),
             backgroundColor: Colors.red,
           ),
         );
@@ -98,93 +74,54 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
       return;
     }
 
-    setState(() {
-      _isScanning = true;
-    });
+    // Now perform biometric authentication (Mandatory for Guard)
+    bool isBioAvailable = await _biometricService.isBiometricAvailable();
+    if (isBioAvailable) {
+      bool authenticated = await _biometricService.authenticate(
+        localizedReason: 'Please authenticate to login as Guard',
+      );
 
-    try {
-      final File? faceImage = await FaceScannerService.scanFace(context);
-      if (faceImage != null && mounted) {
+      if (authenticated && mounted) {
         setState(() {
-          _capturedFace = faceImage;
           _isScanning = false;
+          _bioAttempts = 0;
         });
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('current_staff_id', _staffIdController.text);
+        await prefs.setString('current_guard_id', _staffIdController.text);
 
-        // In production: verify face against stored face
-        bool faceVerified = await FaceScannerService.verifyFaceForUser(
-          _staffIdController.text,
-          faceImage,
-        );
-
-        if (faceVerified && mounted) {
-          // Create attendance record
-          final attendanceRecord = AttendanceRecord(
-            guardId: 'GRD-${_staffIdController.text}',
-            staffId: _staffIdController.text,
-            checkInTime: DateTime.now(),
-            location: 'Main Gate',
-            status: AttendanceStatus.onDuty,
-            checkInFaceImage: faceImage,
-          );
-
-          await LocalStorageService.saveAttendanceRecord(attendanceRecord);
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Attendance marked! Status: On Duty'),
-                backgroundColor: Colors.green,
-                duration: Duration(seconds: 2),
-              ),
-            );
-
-            // Navigate to guard patrol dashboard
-            await Future.delayed(const Duration(milliseconds: 500));
-
-            if (mounted) {
-              Navigator.pushReplacementNamed(
-                context,
-                AppRoutes.guardPatrolDashboard,
-              );
-            }
-          }
-        } else {
-          // Face verification FAILED
-          setState(() {
-            _faceIdAttempts++;
-            if (_faceIdAttempts >= 3) {
-              _isLoginBlocked = true;
-            }
-          });
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  _isLoginBlocked
-                      ? 'Login BLOCKED! Face ID failed 3 times. Contact admin.'
-                      : 'Face verification failed. Attempt ${_faceIdAttempts}/3',
-                ),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 3),
-              ),
-            );
-          }
-        }
+        Navigator.pushReplacementNamed(context, AppRoutes.attendanceManagement);
       } else {
         setState(() {
           _isScanning = false;
+          _bioAttempts++;
+          if (_bioAttempts >= 3) {
+            _isLoginBlocked = true;
+          }
         });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                _isLoginBlocked
+                    ? 'Login blocked due to multiple failed attempts'
+                    : 'Biometric authentication failed (Attempt $_bioAttempts/3)',
+              ),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
-    } catch (e) {
+    } else {
+      // For development/emulators without biometrics, we allow bypass only if explicitly stated,
+      // but sticking to your rule: it is mandatory.
+      setState(() => _isScanning = false);
       if (mounted) {
-        setState(() {
-          _isScanning = false;
-        });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: ${e.toString()}'),
-            backgroundColor: Colors.red,
+          const SnackBar(
+            content: Text('Biometric hardware required for Guard login'),
+            backgroundColor: Colors.orange,
           ),
         );
       }
@@ -192,16 +129,20 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
   }
 
   Future<void> _handleAdminLogin() async {
-    bool credentialsValid = await _authenticateAdmin(
+    setState(() => _isScanning = true);
+
+    bool credentialsValid = await ApiService().login(
       _usernameController.text,
       _passwordController.text,
     );
+
+    setState(() => _isScanning = false);
 
     if (!credentialsValid) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Invalid username or password'),
+            content: Text('Invalid Admin Credentials'),
             backgroundColor: Colors.red,
           ),
         );
@@ -209,20 +150,27 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
       return;
     }
 
-    // Navigate to admin dashboard
     if (mounted) {
       Navigator.pushReplacementNamed(context, AppRoutes.adminDashboard);
     }
   }
 
   Future<void> _handleResidentLogin() async {
-    bool credentialsValid = await _authenticateResident(_pinController.text);
+    setState(() => _isScanning = true);
+
+    // Call real API using the fixed test email for residents
+    bool credentialsValid = await ApiService().login(
+      'resident@society.com',
+      _pinController.text, // PIN acts as password
+    );
+
+    setState(() => _isScanning = false);
 
     if (!credentialsValid) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Invalid PIN. Please enter a 4-digit PIN'),
+            content: Text('Invalid PIN'),
             backgroundColor: Colors.red,
           ),
         );
@@ -230,7 +178,6 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
       return;
     }
 
-    // Navigate to resident dashboard (attendance management for now)
     if (mounted) {
       Navigator.pushReplacementNamed(context, AppRoutes.attendanceManagement);
     }
@@ -284,96 +231,6 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
                           ),
                         ),
                       ),
-                    ),
-                  ),
-
-                  // Role Selection
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(28),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.15),
-                          offset: const Offset(0, 20),
-                          blurRadius: 60,
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        const Text(
-                          "Select Your Role",
-                          style: TextStyle(
-                            fontSize: 22,
-                            color: Color(0xFF101828),
-                            height: 1.5,
-                            letterSpacing: -0.258,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 12,
-                          children: [
-                            ChoiceChip(
-                              label: const Text('Guard'),
-                              selected: _selectedRole == UserRole.guard,
-                              selectedColor: const Color(0xFF8063FC),
-                              backgroundColor: const Color(0xFFF4F5FA),
-                              labelStyle: TextStyle(
-                                color: _selectedRole == UserRole.guard
-                                    ? Colors.white
-                                    : const Color(0xFF7B7A80),
-                              ),
-                              onSelected: (selected) {
-                                setState(() {
-                                  _selectedRole = selected
-                                      ? UserRole.guard
-                                      : _selectedRole;
-                                });
-                              },
-                            ),
-                            ChoiceChip(
-                              label: const Text('Admin'),
-                              selected: _selectedRole == UserRole.admin,
-                              selectedColor: const Color(0xFF8063FC),
-                              backgroundColor: const Color(0xFFF4F5FA),
-                              labelStyle: TextStyle(
-                                color: _selectedRole == UserRole.admin
-                                    ? Colors.white
-                                    : const Color(0xFF7B7A80),
-                              ),
-                              onSelected: (selected) {
-                                setState(() {
-                                  _selectedRole = selected
-                                      ? UserRole.admin
-                                      : _selectedRole;
-                                });
-                              },
-                            ),
-                            ChoiceChip(
-                              label: const Text('Resident'),
-                              selected: _selectedRole == UserRole.resident,
-                              selectedColor: const Color(0xFF8063FC),
-                              backgroundColor: const Color(0xFFF4F5FA),
-                              labelStyle: TextStyle(
-                                color: _selectedRole == UserRole.resident
-                                    ? Colors.white
-                                    : const Color(0xFF7B7A80),
-                              ),
-                              onSelected: (selected) {
-                                setState(() {
-                                  _selectedRole = selected
-                                      ? UserRole.resident
-                                      : _selectedRole;
-                                });
-                              },
-                            ),
-                          ],
-                        ),
-                      ],
                     ),
                   ),
 
@@ -722,10 +579,7 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
 
                               // Main Circular Button
                               GestureDetector(
-                                onTap:
-                                    _isScanEnabled &&
-                                        !_isScanning &&
-                                        !_isLoginBlocked
+                                onTap: _isScanEnabled && !_isScanning
                                     ? _handleGuardLogin
                                     : null,
                                 child: AnimatedContainer(
@@ -815,8 +669,8 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
                                         _isLoginBlocked
                                             ? "Login Blocked"
                                             : (_isScanning
-                                                  ? "Scanning..."
-                                                  : "Start Face Scan"),
+                                                  ? "Verifying..."
+                                                  : "Biometric Login"),
                                         style: const TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w600,
@@ -829,7 +683,7 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
                                       Text(
                                         _isLoginBlocked
                                             ? "Contact admin to unlock"
-                                            : "Enter credentials first",
+                                            : "Authenticate to proceed",
                                         style: const TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.normal,

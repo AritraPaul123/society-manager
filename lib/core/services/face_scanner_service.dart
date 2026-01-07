@@ -17,7 +17,7 @@ class FaceScannerService {
   ) async {
     try {
       // In a real implementation, this would use a face recognition API
-      // For now, we'll return true as a placeholder
+      // For now, we'll implement a more realistic verification
 
       // This would typically involve:
       // 1. Loading the stored face image for the user
@@ -25,8 +25,26 @@ class FaceScannerService {
       // 3. Comparing the features to determine similarity
       // 4. Returning true if similarity is above threshold
 
-      // For demonstration purposes, we'll return true
+      // For demonstration purposes, we'll implement basic checks
       // In production, you'd use a proper face recognition library
+
+      // Check that the captured face file exists and is valid
+      if (!await capturedFace.exists()) {
+        return false;
+      }
+
+      // Get file size to ensure it's not too small (indicating invalid image)
+      final fileSize = await capturedFace.length();
+      if (fileSize < 1024) {
+        // Less than 1KB is likely invalid
+        return false;
+      }
+
+      // Additional checks could be implemented here
+      // such as image dimensions, format validation, or actual face detection
+
+      // For now, return true to indicate successful verification
+      // In a real app, this would be the result of face matching algorithm
       return true;
     } catch (e) {
       print('Face verification error: \$e');

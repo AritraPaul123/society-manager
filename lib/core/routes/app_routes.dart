@@ -20,6 +20,9 @@ import 'package:society_man/features/guard/presentation/screens/guard_simulate_s
 import 'package:society_man/features/guard/presentation/screens/guard_active_patrol_screen.dart';
 import 'package:society_man/features/guard/presentation/screens/enhanced_patrol_screen.dart';
 import 'package:society_man/features/guard/presentation/screens/incident_reporting_screen.dart';
+import 'package:society_man/features/visitor/presentation/screens/active_visitors_screen.dart';
+import 'package:society_man/features/visitor/presentation/screens/visitor_history_screen.dart';
+import 'package:society_man/features/guard/presentation/screens/guard_profile_screen.dart';
 import 'package:society_man/features/admin/presentation/screens/admin_dashboard_screen.dart';
 
 class AppRoutes {
@@ -44,6 +47,9 @@ class AppRoutes {
   static const String guardActivePatrol = '/guard-active-patrol';
   static const String enhancedPatrol = '/enhanced-patrol';
   static const String incidentReporting = '/incident-reporting';
+  static const String activeVisitors = '/active-visitors';
+  static const String visitorHistory = '/visitor-history';
+  static const String guardProfile = '/guard-profile';
 
   static Map<String, WidgetBuilder> getRoutes() {
     return {
@@ -83,6 +89,8 @@ class AppRoutes {
         patrolId: 'PAT001',
         checkpointId: 'CP001',
       ),
+      activeVisitors: (context) => const ActiveVisitorsScreen(),
+      visitorHistory: (context) => const VisitorHistoryScreen(),
     };
   }
 
@@ -106,6 +114,7 @@ class AppRoutes {
             visitorPhone: args['visitorPhone'] as String,
             visitorPurpose: args['visitorPurpose'] as String,
             visitorCompany: args['visitorCompany'] as String?,
+            eidNumber: args['eidNumber'] as String?,
           ),
         );
       case markAttendance:
@@ -115,6 +124,11 @@ class AppRoutes {
             staffId: args['staffId'] as String,
             guardId: args['guardId'] as String,
           ),
+        );
+      case guardProfile:
+        final guardId = settings.arguments as String? ?? 'GRD001';
+        return MaterialPageRoute(
+          builder: (context) => GuardProfileScreen(guardId: guardId),
         );
       default:
         return null;

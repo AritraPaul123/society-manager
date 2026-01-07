@@ -193,15 +193,7 @@ class WelcomeScreen extends StatelessWidget {
   Widget _buildRoleCards(BuildContext context) {
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 345),
-      child: Column(
-        children: [
-          _buildGuardCard(context),
-          const SizedBox(height: 24),
-          _buildResidentCard(context),
-          const SizedBox(height: 24),
-          _buildAdminCard(context),
-        ],
-      ),
+      child: Column(children: [_buildGuardCard(context)]),
     );
   }
 

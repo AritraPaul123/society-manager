@@ -24,6 +24,7 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
   int _currentCheckpointIndex = 0;
   bool _isPatrolPaused = false;
   bool _isSyncing = false;
+  bool _isCapturingPhoto = false;
 
   @override
   void initState() {
@@ -74,7 +75,7 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
       }
 
       // Check if patrol is complete and needs to be finalized
-      final activePatrol = await LocalStorageService.getActivePatrol();
+      final activePatrol = await LocalStorageService.getActivePatrolSession();
       if (activePatrol != null && _isPatrolComplete()) {
         // Complete the patrol and sync to server
         await LocalStorageService.saveActivePatrol(null);
@@ -156,74 +157,118 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
   }
 
   Future<void> _scanCheckpoint() async {
-    if (_isScanning) return;
+    if (_isScanning || _isCapturingPhoto) return;
 
     setState(() {
       _isScanning = true;
     });
 
+    String? qrCode;
     try {
-      final qrCode = await QRScannerService.scanCheckpointQR(context);
+      // Step 1: Scan QR Code
+      qrCode = await QRScannerService.scanQRCode(context);
 
-      if (qrCode != null && mounted) {
-        // Find the matching checkpoint
-        final matchingCheckpoint = _checkpoints.firstWhere(
-          (cp) => cp.qrCode == qrCode,
-          orElse: () =>
-              _checkpoints[_currentCheckpointIndex], // fallback to current
-        );
-
-        // Capture photo using camera
-        final photo = await _capturePhoto();
-
-        if (photo != null) {
-          // Update checkpoint with photo and completion time
-          final updatedCheckpoint = PatrolCheckpoint(
-            id: matchingCheckpoint.id,
-            name: matchingCheckpoint.name,
-            qrCode: matchingCheckpoint.qrCode,
-            sequenceNumber: matchingCheckpoint.sequenceNumber,
-            isCompleted: true,
-            completedAt: DateTime.now(),
-            photo: photo,
-          );
-
-          // Update the checkpoint in the list
-          final updatedCheckpoints = List<PatrolCheckpoint>.from(_checkpoints);
-          final index = updatedCheckpoints.indexWhere(
-            (cp) => cp.id == matchingCheckpoint.id,
-          );
-          if (index != -1) {
-            updatedCheckpoints[index] = updatedCheckpoint;
-          }
-
-          setState(() {
-            _checkpoints = updatedCheckpoints;
-            _currentCheckpointIndex = _checkpoints.indexWhere(
-              (cp) => !cp.isCompleted,
-            );
-          });
-
-          // Save to local storage for offline access
-          await _savePatrolProgress();
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Checkpoint "${matchingCheckpoint.name}" completed!',
-                ),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        }
+      if (qrCode == null || !mounted) {
+        setState(() {
+          _isScanning = false;
+        });
+        return;
       }
-    } catch (e) {
+
+      // Find the matching checkpoint
+      final matchingCheckpoint = _checkpoints.firstWhere(
+        (cp) => cp.qrCode == qrCode,
+        orElse: () => _checkpoints[_currentCheckpointIndex],
+      );
+
+      // Show success message for QR scan
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error scanning checkpoint: ${e.toString()}'),
+            content: Text('QR Code Verified: ${matchingCheckpoint.name}'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+      // Wait a moment before opening camera
+      await Future.delayed(const Duration(seconds: 2));
+
+      // Step 2: Capture checkpoint photo
+      setState(() {
+        _isScanning = false;
+        _isCapturingPhoto = true;
+      });
+
+      final photo = await _captureCheckpointPhoto(matchingCheckpoint.name);
+
+      if (photo != null && mounted) {
+        // Step 3: Update checkpoint with photo and completion time
+        final updatedCheckpoint = PatrolCheckpoint(
+          id: matchingCheckpoint.id,
+          name: matchingCheckpoint.name,
+          qrCode: matchingCheckpoint.qrCode,
+          sequenceNumber: matchingCheckpoint.sequenceNumber,
+          isCompleted: true,
+          completedAt: DateTime.now(),
+          photo: photo,
+        );
+
+        // Update the checkpoint in the list
+        final updatedCheckpoints = List<PatrolCheckpoint>.from(_checkpoints);
+        final index = updatedCheckpoints.indexWhere(
+          (cp) => cp.id == matchingCheckpoint.id,
+        );
+        if (index != -1) {
+          updatedCheckpoints[index] = updatedCheckpoint;
+        }
+
+        setState(() {
+          _checkpoints = updatedCheckpoints;
+
+          // Find next incomplete checkpoint
+          final nextIncompleteIndex = _checkpoints.indexWhere(
+            (cp) => !cp.isCompleted,
+          );
+
+          if (nextIncompleteIndex != -1) {
+            _currentCheckpointIndex = nextIncompleteIndex;
+          } else {
+            // All checkpoints completed
+            _currentCheckpointIndex = _checkpoints.length;
+            _showPatrolCompletion();
+          }
+        });
+
+        // Save to local storage for offline access
+        await _savePatrolProgress();
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Checkpoint "${matchingCheckpoint.name}" completed!',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else if (mounted) {
+        // If photo capture failed or was cancelled
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Checkpoint photo not captured. Please try again.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error in scan process: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -232,50 +277,28 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
       if (mounted) {
         setState(() {
           _isScanning = false;
+          _isCapturingPhoto = false;
         });
       }
     }
   }
 
-  Future<File?> _capturePhoto() async {
+  Future<File?> _captureCheckpointPhoto(String checkpointName) async {
     try {
-      final cameras = await availableCameras();
-      final firstCamera = cameras.firstWhere(
-        (camera) => camera.lensDirection == CameraLensDirection.back,
-        orElse: () => cameras.first,
+      // Show camera immediately after QR scan
+      final photoFile = await Navigator.of(context).push<File?>(
+        MaterialPageRoute(
+          builder: (context) =>
+              CheckpointCameraScreen(checkpointName: checkpointName),
+          fullscreenDialog: true,
+        ),
       );
 
-      final controller = CameraController(
-        firstCamera,
-        ResolutionPreset.medium,
-        enableAudio: false,
-      );
-
-      await controller.initialize();
-
-      if (mounted) {
-        // Anti-cheat: Ensure photo is taken directly from camera
-        // Block gallery uploads, screenshots, and reused images
-        final XFile photo = await controller.takePicture();
-
-        // Additional validation could be added here
-        // For example, checking EXIF data to ensure it's a genuine camera photo
-        // This ensures the photo is captured live from the camera
-
-        await controller.dispose();
-        return File(photo.path);
-      }
+      return photoFile;
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error capturing photo: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      print('Error navigating to camera screen: $e');
+      return null;
     }
-    return null;
   }
 
   Future<void> _savePatrolProgress() async {
@@ -328,6 +351,24 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
   }
 
   Future<void> _reportIncident() async {
+    // Check if patrol is completed
+    bool allCompleted = _checkpoints.every((cp) => cp.isCompleted);
+
+    String checkpointId;
+    if (allCompleted && _checkpoints.isNotEmpty) {
+      // If all completed, use the last checkpoint
+      checkpointId = _checkpoints.last.id;
+    } else if (_currentCheckpointIndex >= 0 &&
+        _currentCheckpointIndex < _checkpoints.length) {
+      checkpointId = _checkpoints[_currentCheckpointIndex].id;
+    } else if (_checkpoints.isNotEmpty) {
+      // Fallback to first checkpoint
+      checkpointId = _checkpoints.first.id;
+    } else {
+      // If no checkpoints available
+      checkpointId = 'UNKNOWN';
+    }
+
     // Navigate to incident reporting screen
     Navigator.pushNamed(
       context,
@@ -335,7 +376,7 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
       arguments: {
         'guardId': 'GRD001',
         'patrolId': 'PATROL_${DateTime.now().millisecondsSinceEpoch}',
-        'checkpointId': _checkpoints[_currentCheckpointIndex].id,
+        'checkpointId': checkpointId,
       },
     );
   }
@@ -481,7 +522,137 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
   }
 
   Widget _buildCurrentCheckpointCard() {
-    if (_currentCheckpointIndex >= _checkpoints.length) {
+    // Check if all checkpoints are completed
+    bool allCompleted = _checkpoints.every((cp) => cp.isCompleted);
+
+    if (allCompleted) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFF4CAF50), width: 3),
+              ),
+              child: const Icon(
+                Icons.check,
+                size: 48,
+                color: Color(0xFF4CAF50),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Patrol Completed!',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Colors.black,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Congratulations! You have completed all checkpoints.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 16, color: Colors.grey),
+            ),
+            const SizedBox(height: 24),
+            // Summary of completed checkpoints
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF5F5F5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Total Checkpoints:',
+                        style: TextStyle(fontSize: 16, color: Colors.black54),
+                      ),
+                      Text(
+                        '${_checkpoints.length}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Completed:',
+                        style: TextStyle(fontSize: 16, color: Colors.black54),
+                      ),
+                      Text(
+                        '${_checkpoints.where((cp) => cp.isCompleted).length}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF4CAF50),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () {
+                // Navigate to attendance management
+                Navigator.pushReplacementNamed(
+                  context,
+                  AppRoutes.attendanceManagement,
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF8063FC),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  vertical: 16,
+                  horizontal: 32,
+                ),
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              child: const Text(
+                'Return to Dashboard',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Check if current index is valid
+    if (_currentCheckpointIndex < 0 ||
+        _currentCheckpointIndex >= _checkpoints.length) {
+      // If index is out of bounds, return empty container or default state
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -497,10 +668,10 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
         ),
         child: const Column(
           children: [
-            Icon(Icons.check_circle, size: 48, color: Colors.green),
+            Icon(Icons.warning, size: 48, color: Colors.orange),
             SizedBox(height: 16),
             Text(
-              'Patrol Complete!',
+              'No Checkpoints Available',
               style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w500,
@@ -509,7 +680,7 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
             ),
             SizedBox(height: 8),
             Text(
-              'All checkpoints have been completed',
+              'Please contact admin',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: Colors.grey),
             ),
@@ -579,6 +750,24 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
             'Scan QR code to complete',
             style: TextStyle(fontSize: 14, color: Colors.grey[600]),
           ),
+          if (_isScanning) ...[
+            const SizedBox(height: 16),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 8),
+            const Text(
+              'Scanning QR Code...',
+              style: TextStyle(fontSize: 12, color: Colors.blue),
+            ),
+          ],
+          if (_isCapturingPhoto) ...[
+            const SizedBox(height: 16),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 8),
+            const Text(
+              'Opening camera for checkpoint photo...',
+              style: TextStyle(fontSize: 12, color: Colors.blue),
+            ),
+          ],
         ],
       ),
     );
@@ -621,6 +810,7 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
     return Row(
       children: [
         Expanded(
+          flex: 1,
           child: SizedBox(
             height: 56,
             child: OutlinedButton(
@@ -632,19 +822,19 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
                 ),
               ),
               child: Text(
-                _isPatrolPaused ? 'Resume Patrol' : 'Pause Patrol',
-                style: const TextStyle(fontSize: 16, color: Color(0xFF8063FC)),
+                _isPatrolPaused ? 'Resume' : 'Pause',
+                style: const TextStyle(fontSize: 14, color: Color(0xFF8063FC)),
               ),
             ),
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
         Expanded(
           flex: 2,
           child: SizedBox(
             height: 56,
             child: ElevatedButton(
-              onPressed: _isScanning || _isPatrolPaused
+              onPressed: (_isScanning || _isPatrolPaused || _isCapturingPhoto)
                   ? null
                   : _scanCheckpoint,
               style: ElevatedButton.styleFrom(
@@ -673,19 +863,38 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
                         Text('Scanning...'),
                       ],
                     )
+                  : _isCapturingPhoto
+                  ? const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Text('Camera...'),
+                      ],
+                    )
                   : const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.qr_code_scanner),
                         SizedBox(width: 8),
-                        Text('Scan Checkpoint'),
+                        Text('Scan QR & Photo'),
                       ],
                     ),
             ),
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
         Expanded(
+          flex: 1,
           child: SizedBox(
             height: 56,
             child: OutlinedButton(
@@ -810,6 +1019,14 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
                                       color: Colors.grey,
                                     ),
                                   ),
+                                if (checkpoint.photo != null)
+                                  Text(
+                                    'Photo captured',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.green[700],
+                                    ),
+                                  ),
                               ],
                             ),
                           ),
@@ -828,6 +1045,60 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
     );
   }
 
+  Future<void> _showPatrolCompletion() async {
+    // Complete the patrol and save to storage
+    // Create a completed patrol session
+    final patrolSession = PatrolSession(
+      id: 'PATROL_${DateTime.now().millisecondsSinceEpoch}',
+      guardId: 'GRD001', // This should be the actual guard ID
+      startTime: DateTime.now().subtract(
+        const Duration(minutes: 30), // Placeholder
+      ),
+      endTime: DateTime.now(),
+      checkpoints: _checkpoints,
+      isPaused: _isPatrolPaused,
+      isOffline: !_isOnline,
+      currentCheckpointIndex: _checkpoints.length, // Mark as completed
+    );
+
+    await LocalStorageService.saveActivePatrol(null);
+
+    // Show completion message
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false, // Prevent dismissal until user taps finish
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.green),
+                SizedBox(width: 8),
+                Text('Patrol Completed!'),
+              ],
+            ),
+            content: const Text(
+              'Your patrol has ended successfully. All checkpoints completed.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop(); // Close dialog
+                  // Navigate to attendance management
+                  Navigator.pushReplacementNamed(
+                    context,
+                    AppRoutes.attendanceManagement,
+                  );
+                },
+                child: const Text('Finish'),
+              ),
+            ],
+          );
+        },
+      );
+    }
+  }
+
   String _formatTime(DateTime dateTime) {
     return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
   }
@@ -837,5 +1108,215 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
     _connectivitySubscription?.cancel();
     _checkpoints.clear();
     super.dispose();
+  }
+}
+
+// Separate screen for camera to avoid navigation issues
+class CheckpointCameraScreen extends StatefulWidget {
+  final String checkpointName;
+
+  const CheckpointCameraScreen({super.key, required this.checkpointName});
+
+  @override
+  State<CheckpointCameraScreen> createState() => _CheckpointCameraScreenState();
+}
+
+class _CheckpointCameraScreenState extends State<CheckpointCameraScreen> {
+  CameraController? _controller;
+  bool _isCameraReady = false;
+  bool _isTakingPhoto = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeCamera();
+  }
+
+  Future<void> _initializeCamera() async {
+    try {
+      // Get available cameras
+      final cameras = await availableCameras();
+
+      if (cameras.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No camera available'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          Navigator.pop(context, null);
+        }
+        return;
+      }
+
+      // Use back camera if available, otherwise first camera
+      final camera = cameras.firstWhere(
+        (cam) => cam.lensDirection == CameraLensDirection.back,
+        orElse: () => cameras.first,
+      );
+
+      _controller = CameraController(
+        camera,
+        ResolutionPreset.high,
+        enableAudio: false,
+      );
+
+      await _controller!.initialize();
+
+      if (mounted) {
+        setState(() {
+          _isCameraReady = true;
+        });
+      }
+    } catch (e) {
+      print('Camera initialization error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to initialize camera: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.pop(context, null);
+      }
+    }
+  }
+
+  Future<void> _takePhoto() async {
+    if (_controller == null ||
+        !_controller!.value.isInitialized ||
+        _isTakingPhoto) {
+      return;
+    }
+
+    setState(() {
+      _isTakingPhoto = true;
+    });
+
+    try {
+      final XFile photo = await _controller!.takePicture();
+      final File photoFile = File(photo.path);
+
+      // Return the photo file
+      if (mounted) {
+        Navigator.pop(context, photoFile);
+      }
+    } catch (e) {
+      print('Error taking photo: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to take photo: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        setState(() {
+          _isTakingPhoto = false;
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Checkpoint: ${widget.checkpointName}'),
+        backgroundColor: Colors.black,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flash_on),
+            onPressed: () {
+              // Toggle flash if available
+            },
+          ),
+        ],
+      ),
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          if (_isCameraReady && _controller != null)
+            Center(child: CameraPreview(_controller!))
+          else
+            const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text(
+                    'Initializing Camera...',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
+          Positioned(
+            bottom: 32,
+            left: 0,
+            right: 0,
+            child: Column(
+              children: [
+                Text(
+                  'Capture photo of ${widget.checkpointName}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    // Cancel button
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.pop(context, null);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        shape: const CircleBorder(),
+                        padding: const EdgeInsets.all(20),
+                      ),
+                      child: const Icon(Icons.close, size: 30),
+                    ),
+                    // Capture button
+                    ElevatedButton(
+                      onPressed: _isTakingPhoto ? null : _takePhoto,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        shape: const CircleBorder(),
+                        padding: const EdgeInsets.all(20),
+                      ),
+                      child: _isTakingPhoto
+                          ? const SizedBox(
+                              width: 30,
+                              height: 30,
+                              child: CircularProgressIndicator(),
+                            )
+                          : const Icon(
+                              Icons.camera_alt,
+                              size: 40,
+                              color: Colors.black,
+                            ),
+                    ),
+                    // Dummy button for symmetry
+                    const SizedBox(width: 60),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
