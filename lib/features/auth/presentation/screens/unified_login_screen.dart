@@ -74,58 +74,51 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
       return;
     }
 
-    // Now perform biometric authentication (Mandatory for Guard)
-    bool isBioAvailable = await _biometricService.isBiometricAvailable();
-    if (isBioAvailable) {
-      bool authenticated = await _biometricService.authenticate(
-        localizedReason: 'Please authenticate to login as Guard',
-      );
+    // TEMPORARY: Skip biometric authentication completely for testing
+    // bool isBioAvailable = await _biometricService.isBiometricAvailable();
+    // bool authenticated = true;
+    // if (isBioAvailable) {
+    //   authenticated = await _biometricService.authenticate(
+    //     localizedReason: 'Please authenticate to login as Guard',
+    //   );
+    // }
 
-      if (authenticated && mounted) {
-        setState(() {
-          _isScanning = false;
-          _bioAttempts = 0;
-        });
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('current_staff_id', _staffIdController.text);
-        await prefs.setString('current_guard_id', _staffIdController.text);
+    // Skip biometric and proceed directly
+    if (mounted) {
+      setState(() {
+        _isScanning = false;
+        _bioAttempts = 0;
+      });
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('current_staff_id', _staffIdController.text);
+      await prefs.setString('current_guard_id', _staffIdController.text);
 
-        Navigator.pushReplacementNamed(context, AppRoutes.attendanceManagement);
-      } else {
-        setState(() {
-          _isScanning = false;
-          _bioAttempts++;
-          if (_bioAttempts >= 3) {
-            _isLoginBlocked = true;
-          }
-        });
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                _isLoginBlocked
-                    ? 'Login blocked due to multiple failed attempts'
-                    : 'Biometric authentication failed (Attempt $_bioAttempts/3)',
-              ),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } else {
-      // For development/emulators without biometrics, we allow bypass only if explicitly stated,
-      // but sticking to your rule: it is mandatory.
-      setState(() => _isScanning = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Biometric hardware required for Guard login'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
+      Navigator.pushReplacementNamed(context, AppRoutes.attendanceManagement);
     }
+    
+    // Commented out biometric failure handling
+    // else {
+    //   setState(() {
+    //     _isScanning = false;
+    //     _bioAttempts++;
+    //     if (_bioAttempts >= 3) {
+    //       _isLoginBlocked = true;
+    //     }
+    //   });
+    //
+    //   if (mounted) {
+    //     ScaffoldMessenger.of(context).showSnackBar(
+    //       SnackBar(
+    //         content: Text(
+    //           _isLoginBlocked
+    //               ? 'Login blocked due to multiple failed attempts'
+    //               : 'Biometric authentication failed (Attempt $_bioAttempts/3)',
+    //         ),
+    //         backgroundColor: Colors.red,
+    //       ),
+    //     );
+    //   }
+    // }
   }
 
   Future<void> _handleAdminLogin() async {

@@ -277,7 +277,7 @@ class VisitorPermissionScreen extends StatelessWidget {
       purpose: visitorPurpose,
       companyName: visitorCompany,
       entryTime: DateTime.now(),
-      guardId: 'GRD001', // Should be dynamic in real app
+      guardId: 1, // Guard user ID from database
       status: status,
     );
 

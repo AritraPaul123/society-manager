@@ -191,7 +191,7 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
         purpose: _purposeController.text,
         companyName: _companyController.text,
         entryTime: DateTime.now(),
-        guardId: 'GRD001',
+        guardId: 1,
         status: 'draft',
         isDraft: true,
       );
@@ -322,7 +322,7 @@ class _VisitorEntryScanScreenState extends State<VisitorEntryScanScreen> {
         purpose: _purposeController.text,
         companyName: _companyController.text,
         entryTime: DateTime.now(),
-        guardId: 'GRD001', // This should be the actual guard ID
+        guardId: 1, // Guard user ID from database
         status:
             'pending_resident', // Will be updated based on resident approval
       );

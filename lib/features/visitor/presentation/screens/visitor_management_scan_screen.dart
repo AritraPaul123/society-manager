@@ -70,7 +70,7 @@ class _VisitorManagementScanScreenState
               purpose: '',
               entryTime: DateTime.now(),
               status: 'draft',
-              guardId: 'GRD001',
+              guardId: 1,
             );
             await LocalStorageService.saveDraft(draftEntry);
           }

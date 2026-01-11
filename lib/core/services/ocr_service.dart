@@ -14,34 +14,72 @@ class OCRService {
 
     String name = "";
     String idNumber = "";
-    String nationality = "";
-    String expiryDate = "";
 
-    // Emirates ID pattern: 784-YEAR-ID-CHECK
-    RegExp idPattern = RegExp(r'784-\d{4}-\d{7}-\d{1}');
-
+    // Emirates ID patterns - flexible to handle OCR errors
+    RegExp idPattern = RegExp(r'[17]84[-\s]?\d{4}[-\s]?\d{7}[-\s]?\d{1}');
+    RegExp datePattern = RegExp(r'\d{2}[/-]\d{2}[/-]\d{4}');
+    
+    // Get all text lines
+    List<String> allLines = [];
     for (TextBlock block in recognizedText.blocks) {
       for (TextLine line in block.lines) {
         String text = line.text.trim();
-
-        // Try to find ID number
-        if (idPattern.hasMatch(text)) {
-          idNumber = idPattern.stringMatch(text) ?? "";
-        }
-
-        // Simple logic to find name - usually after "Name" or "Name:"
-        if (text.toLowerCase().contains("name")) {
-          // Name is often on the next line or after a colon
-          // This is a naive implementation, real OCR needs better filtering
+        if (text.isNotEmpty) {
+          allLines.add(text);
         }
       }
     }
 
+    // Extract ID number first - handle OCR misreading 7 as 1
+    for (String line in allLines) {
+      if (idPattern.hasMatch(line)) {
+        String match = idPattern.stringMatch(line) ?? "";
+        // Normalize: fix common OCR error (184 -> 784) and format
+        idNumber = match.replaceAll(RegExp(r'[\s]'), '-');
+        if (idNumber.startsWith('184-')) {
+          idNumber = idNumber.replaceFirst('184-', '784-');
+        }
+        break;
+      }
+    }
+
+    // Extract full name - handle various OCR formats
+    for (int i = 0; i < allLines.length; i++) {
+      String line = allLines[i];
+      String lowerLine = line.toLowerCase();
+
+      // Check if line contains "name:" or "name" followed by the actual name
+      if (lowerLine.startsWith('name:') || lowerLine.startsWith('name')) {
+        String extractedName = '';
+        
+        if (lowerLine.startsWith('name:')) {
+          // Extract text after "name:"
+          extractedName = line.substring(5).trim();
+        } else if (lowerLine.startsWith('name')) {
+          // Extract text after "name" (no colon)
+          extractedName = line.substring(4).trim();
+        }
+        
+        if (extractedName.isNotEmpty && 
+            extractedName.length > 5 &&
+            !datePattern.hasMatch(extractedName) &&
+            !idPattern.hasMatch(extractedName) &&
+            !extractedName.toLowerCase().contains('nationality')) {
+          name = extractedName;
+          break;
+        }
+      }
+    }
+
+    print('=== OCR EXTRACTION ===');
+    print('ID Number: $idNumber');
+    print('Full Name: $name');
+    print('All text: ${allLines.join(" | ")}');
+    print('=== END OCR ===');
+
     return {
       'idNumber': idNumber,
       'name': name,
-      'nationality': nationality,
-      'expiryDate': expiryDate,
       'rawText': recognizedText.text,
     };
   }

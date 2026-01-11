@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:society_man/core/routes/app_routes.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:society_man/core/services/api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class GuardPatrolDashboardScreen extends StatelessWidget {
   const GuardPatrolDashboardScreen({super.key});
@@ -239,7 +241,9 @@ class GuardPatrolDashboardScreen extends StatelessWidget {
           onPressed: () async {
             // Check internet connectivity before starting patrol
             var connectivityResult = await (Connectivity().checkConnectivity());
-            if (connectivityResult == ConnectivityResult.none) {
+            bool isOnline = connectivityResult != ConnectivityResult.none;
+
+            if (!isOnline) {
               // No internet connection
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -254,12 +258,52 @@ class GuardPatrolDashboardScreen extends StatelessWidget {
               return;
             }
 
-            // Internet is available, proceed with patrol start
-            // TODO: Sync patrol route, QR points, guard ID
-            // TODO: Enable offline mode after sync
+            // Start patrol via API
+            try {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Starting patrol...'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              }
 
-            if (context.mounted) {
-              Navigator.pushNamed(context, AppRoutes.guardPatrolDashboard);
+              final patrolData = await ApiService().startPatrol(
+                1, // Guard ID from database
+                isOffline: false,
+              );
+
+              if (patrolData != null && context.mounted) {
+                // Save patrol ID for checkpoint logging
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.setInt('active_patrol_id', patrolData['id']);
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Patrol started successfully!'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+
+                Navigator.pushNamed(context, AppRoutes.guardPatrolDashboard);
+              } else if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Failed to start patrol. Please try again.'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Error starting patrol: ${e.toString()}'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
             }
           },
           style: ElevatedButton.styleFrom(

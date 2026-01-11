@@ -7,7 +7,8 @@ import 'package:society_man/core/models/auth_models.dart';
 class ApiService {
   static String get baseUrl {
     if (Platform.isAndroid) {
-      return 'http://192.168.29.93:5001/api/v1';
+      // Use localhost because of ADB reverse port forwarding
+      return 'http://localhost:5001/api/v1';
     }
     return 'http://localhost:5001/api/v1';
   }
@@ -180,7 +181,7 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final response = await http.get(
-        Uri.parse('$baseUrl/visitor/active'),
+        Uri.parse('$baseUrl/visitors/active'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -200,11 +201,17 @@ class ApiService {
   Future<bool> createVisitorEntry(VisitorEntry entry) async {
     try {
       final headers = await _getHeaders();
+      print('=== VISITOR ENTRY DEBUG ===');
+      print('URL: $baseUrl/visitors/check-in');
+      print('Body: ${jsonEncode(entry.toBackendJson())}');
       final response = await http.post(
-        Uri.parse('$baseUrl/visitor/entry'),
+        Uri.parse('$baseUrl/visitors/check-in'),
         headers: headers,
-        body: jsonEncode(entry.toMap()),
+        body: jsonEncode(entry.toBackendJson()),
       );
+      print('Response Status: ${response.statusCode}');
+      print('Response Body: ${response.body}');
+      print('=== END DEBUG ===');
       return response.statusCode == 201;
     } catch (e) {
       print('CreateVisitor error: $e');
@@ -215,8 +222,8 @@ class ApiService {
   Future<bool> updateVisitorExit(String id) async {
     try {
       final headers = await _getHeaders();
-      final response = await http.put(
-        Uri.parse('$baseUrl/visitor/exit/$id'),
+      final response = await http.post(
+        Uri.parse('$baseUrl/visitors/check-out/$id'),
         headers: headers,
       );
       return response.statusCode == 200;
@@ -230,7 +237,7 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final response = await http.get(
-        Uri.parse('$baseUrl/visitor/history'),
+        Uri.parse('$baseUrl/visitors/history'),
         headers: headers,
       );
       if (response.statusCode == 200) {
@@ -244,6 +251,111 @@ class ApiService {
     } catch (e) {
       print('GetHistory error: $e');
       return [];
+    }
+  }
+
+  // Patrol Endpoints
+  Future<Map<String, dynamic>?> startPatrol(
+    int guardId, {
+    int? routeId,
+    bool isOffline = false,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final queryParams = {
+        'guardId': guardId.toString(),
+        if (routeId != null) 'routeId': routeId.toString(),
+        'isOffline': isOffline.toString(),
+      };
+
+      print('=== START PATROL DEBUG ===');
+      print('URL: $baseUrl/patrols/start');
+      print('Query Params: $queryParams');
+
+      final response = await http.post(
+        Uri.parse(
+          '$baseUrl/patrols/start',
+        ).replace(queryParameters: queryParams),
+        headers: headers,
+      );
+
+      print('Response Status: ${response.statusCode}');
+      print('Response Body: ${response.body}');
+      print('=== END DEBUG ===');
+
+      if (response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          return data['data'];
+        }
+      }
+      return null;
+    } catch (e) {
+      print('StartPatrol error: $e');
+      return null;
+    }
+  }
+
+  Future<bool> logCheckpoint(
+    int patrolId,
+    int qrPointId, {
+    String? comments,
+    String? photoUrl,
+    double? latitude,
+    double? longitude,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final queryParams = {
+        'qrPointId': qrPointId.toString(),
+        if (comments != null) 'comments': comments,
+        if (photoUrl != null) 'photoUrl': photoUrl,
+        if (latitude != null) 'latitude': latitude.toString(),
+        if (longitude != null) 'longitude': longitude.toString(),
+      };
+
+      print('=== LOG CHECKPOINT DEBUG ===');
+      print('URL: $baseUrl/patrols/$patrolId/log');
+      print('Query Params: $queryParams');
+
+      final response = await http.post(
+        Uri.parse(
+          '$baseUrl/patrols/$patrolId/log',
+        ).replace(queryParameters: queryParams),
+        headers: headers,
+      );
+
+      print('Response Status: ${response.statusCode}');
+      print('Response Body: ${response.body}');
+      print('=== END DEBUG ===');
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('LogCheckpoint error: $e');
+      return false;
+    }
+  }
+
+  Future<bool> endPatrol(int patrolId) async {
+    try {
+      final headers = await _getHeaders();
+
+      print('=== END PATROL DEBUG ===');
+      print('URL: $baseUrl/patrols/$patrolId/end');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/patrols/$patrolId/end'),
+        headers: headers,
+      );
+
+      print('Response Status: ${response.statusCode}');
+      print('Response Body: ${response.body}');
+      print('=== END DEBUG ===');
+
+      return response.statusCode == 200;
+    } catch (e) {
+      print('EndPatrol error: $e');
+      return false;
     }
   }
 

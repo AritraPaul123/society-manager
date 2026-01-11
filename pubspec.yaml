@@ -76,9 +76,6 @@ dependencies:
   # State Management
   provider: ^6.1.1
   
-  # Background Sync
-  workmanager: ^0.5.2
-  
   # JSON serialization
   json_annotation: ^4.8.1
   

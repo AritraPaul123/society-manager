@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:society_man/core/services/qr_scanner_service.dart';
@@ -8,6 +9,8 @@ import 'package:society_man/core/models/auth_models.dart';
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:society_man/core/services/connectivity_service.dart';
+import 'package:society_man/core/services/api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class GuardPatrolScanScreen extends StatefulWidget {
   const GuardPatrolScanScreen({super.key});
@@ -214,6 +217,39 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
           completedAt: DateTime.now(),
           photo: photo,
         );
+
+        // Log checkpoint to backend if online
+        if (_isOnline) {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            final patrolId = prefs.getInt('active_patrol_id');
+
+            if (patrolId != null) {
+              // Use file path as photo URL (similar to attendance)
+              String? photoUrl;
+              if (photo.existsSync()) {
+                photoUrl = photo.path;
+                print('Photo path: $photoUrl');
+              }
+
+              // Use sequence number as QR point ID (1-5)
+              final success = await ApiService().logCheckpoint(
+                patrolId,
+                matchingCheckpoint.sequenceNumber,
+                comments: 'Checkpoint scanned with photo verification',
+                photoUrl: photoUrl,
+              );
+
+              if (success) {
+                print('Checkpoint logged to backend successfully with photo');
+              } else {
+                print('Failed to log checkpoint to backend');
+              }
+            }
+          } catch (e) {
+            print('Error logging checkpoint to backend: $e');
+          }
+        }
 
         // Update the checkpoint in the list
         final updatedCheckpoints = List<PatrolCheckpoint>.from(_checkpoints);
@@ -1046,6 +1082,27 @@ class _GuardPatrolScanScreenState extends State<GuardPatrolScanScreen> {
   }
 
   Future<void> _showPatrolCompletion() async {
+    // End patrol via backend API if online
+    if (_isOnline) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final patrolId = prefs.getInt('active_patrol_id');
+
+        if (patrolId != null) {
+          final success = await ApiService().endPatrol(patrolId);
+
+          if (success) {
+            print('Patrol ended successfully in backend');
+            await prefs.remove('active_patrol_id'); // Clear stored patrol ID
+          } else {
+            print('Failed to end patrol in backend');
+          }
+        }
+      } catch (e) {
+        print('Error ending patrol in backend: $e');
+      }
+    }
+
     // Complete the patrol and save to storage
     // Create a completed patrol session
     final patrolSession = PatrolSession(

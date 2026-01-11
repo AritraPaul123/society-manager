@@ -190,7 +190,7 @@ class VisitorEntry {
   final String? companyName;
   final DateTime entryTime;
   DateTime? exitTime;
-  final String guardId;
+  final int guardId;
   String
   status; // 'allowed', 'pending_resident', 'denied', 'draft', 'checked_out'
   final bool isDraft;
@@ -228,6 +228,20 @@ class VisitorEntry {
     };
   }
 
+  // Backend API expects different field names
+  Map<String, dynamic> toBackendJson() {
+    return {
+      'name': visitorName,
+      'mobileNumber': phoneNumber,
+      'visitPurpose': purpose,
+      'emiratesId': eidNumber,
+      'companyName': companyName,
+      'checkInTime': entryTime.toIso8601String(),
+      'guardId': guardId,
+      'status': status,
+    };
+  }
+
   Map<String, dynamic> toJson() => toMap();
 
   factory VisitorEntry.fromMap(Map<String, dynamic> map) {
@@ -244,7 +258,7 @@ class VisitorEntry {
       exitTime: map['exitTime'] != null
           ? DateTime.parse(map['exitTime'])
           : null,
-      guardId: map['guardId']?.toString() ?? '',
+      guardId: int.tryParse(map['guardId']?.toString() ?? '0') ?? 0,
       status: map['status'] ?? 'allowed',
       isDraft: map['isDraft'] ?? false,
       photoPath: map['photoPath'],
