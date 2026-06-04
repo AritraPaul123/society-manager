@@ -1,16 +1,10 @@
-# society_man
+Society Manager is a feature-rich Flutter application designed to streamline community and society management. It prioritizes secure access control, identity verification, and local data management.
 
-A new Flutter project.
+Key Features:
 
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+🔐 Advanced Authentication: Built-in biometric authentication and face scanning capabilities.
+📄 Automated ID Processing: Seamless OCR integration (powered by Google ML Kit) specifically tailored for scanning Emirates IDs.
+📷 QR Code Access: Generate and scan QR codes for streamlined entry and exit management.
+📍 Location Tracking: Integrated geolocation services for location-aware features.
+📊 Analytics Dashboard: Visual insights and charts for community data.
+📶 Offline-First: Robust local storage using SQLite and Hive to ensure the app works smoothly even without internet connectivity.
